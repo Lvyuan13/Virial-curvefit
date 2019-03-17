@@ -1,7 +1,6 @@
 function curvefit_viral
 %% 局部优化拟合函数
 %NP=140; Number of Points
-clear
 %设置为长数据型；
 format long;
 %理想气体常数
@@ -16,16 +15,10 @@ Tc2=396.44;%trifluoroiodomethane
 %Tc2=374.25; %HFC-134a
 %Tc2=351.26 ;%HFC-32
 %% 全部归0 方便二次运行
-coeff=0;%归0
-RHOcal=0;
-rho=0;
-RHOC=0;
-Dev=0;
-Dev_P=0;
-Dev_RHO=0;
+
 
 %% 人机交互设计
-Readfile=input('which file do you want to use:\n （请输入你需要使用文件的文件名，不加.csv):\n','s');
+Readfile=input('请输入你需要使用文件的文件名.csv .xlsx .xls 文件均可，不加.csv .xlsx .xls:\n:','s');
 Readedfile=[Readfile,'.csv'];
 %LP=21;
 try
@@ -34,9 +27,11 @@ catch
 datafile=xlsread([Readfile,'.xlsx']);
 end
 [NP,N]=size(datafile);
-M=['你的数据文件共有',num2str(NP),'个数据点，每个数据点共',num2str(N),'个维度'];
+M=[Readedfile,'文件共有',num2str(NP),'个数据点，每个数据点共',num2str(N),'个维度'];
 disp(M);
-
+%预分配内存
+RHOcal=ones(NP,1);
+RHO_temp=0;
 %将5个维度的数据先全部读取并定义好。
 Zexp=datafile(:,5);
 T=datafile(:,1);
@@ -50,9 +45,9 @@ data=datafile(:,1:4);
 %X2=1-X1;
 askoperation=input('what do you want to do? Optimize(Y)/caculate(C or other random symbol):\n（你想拟合还是计算，拟合输入Y，计算输入C)\n','s');
 %% read coeffcient from file viralco.xls
-coeff=csvread('viralco.csv');
-coeff=coeff';
-%disp('read done\n(维里系数读取完毕）\n');
+virial_coeff=csvread('viralco.csv');
+virial_coeff=virial_coeff';
+disp('read done(viralco.csv系数文件读取完毕)');
 %% 全局优化
 if askoperation=='Y'
 % 使用拟合程序，开始拟合
@@ -67,12 +62,12 @@ ub=[];
 %Dev=(Zcal-Zexp)./Zexp
 model=@viral_TRHO2P;
 problem=createOptimProblem('lsqcurvefit','objective', ...
-    model,'xdata',data,'ydata',P,'x0',coeff,'lb',lb,'ub',ub);
+    model,'xdata',data,'ydata',P,'x0',virial_coeff,'lb',lb,'ub',ub);
 %拟合模型是 model 中定义，输入是data定义，输出P,给定的初始值是coeff0
 ms=MultiStart;
 %coeff_fin是最终的存取值
 [coeff_fin,fval,exitflag,output,solutions]=run(ms,problem,50);
-coeff=coeff_fin;
+virial_coeff=coeff_fin;
 %disp('optimize done');
 disp('拟合完毕');
 else
@@ -81,34 +76,34 @@ else
 end
 %% caculate Pressure/kPa
 disp('计算开始,稍等片刻......')
-P_cal=viral_TRHO2P(coeff,data);
+P_cal=viral_TRHO2P(virial_coeff,data);
 %Z_cal=P_cal./(rho.*R*T);
 Dev_P=(P_cal-P)./P;
 Dev_P=100*Dev_P;
 %L=L1;
 %% 维里系数
 % 下面从三次方程的角度由P X T反求出RHO
-b1=coeff(1);
-b2=coeff(2);
-b3=coeff(3);
-b4=coeff(4);
-b5=coeff(5);
-b6=coeff(6);
-b7=coeff(7);
-b8=coeff(8);
-b9=coeff(9);
-c1=coeff(10);
-c2=coeff(11);
-c3=coeff(12);
-c4=coeff(13);
-c5=coeff(14);
-c6=coeff(15);
-c7=coeff(16);
-c8=coeff(17);
-c9=coeff(18);
-c10=coeff(19);
-c11=coeff(20);
-c12=coeff(21);
+b1=virial_coeff(1);
+b2=virial_coeff(2);
+b3=virial_coeff(3);
+b4=virial_coeff(4);
+b5=virial_coeff(5);
+b6=virial_coeff(6);
+b7=virial_coeff(7);
+b8=virial_coeff(8);
+b9=virial_coeff(9);
+c1=virial_coeff(10);
+c2=virial_coeff(11);
+c3=virial_coeff(12);
+c4=virial_coeff(13);
+c5=virial_coeff(14);
+c6=virial_coeff(15);
+c7=virial_coeff(16);
+c8=virial_coeff(17);
+c9=virial_coeff(18);
+c10=virial_coeff(19);
+c11=virial_coeff(20);
+c12=virial_coeff(21);
 Tc12=sqrt(Tc1*Tc2);
 Tc112=(Tc1*Tc1*Tc2)^(1/3);
 Tc221=(Tc1*Tc2*Tc2)^(1/3);
@@ -150,29 +145,41 @@ tri_coeff=[Cm,Bm,I,-PRT];
 %          这样程序会失去通用性，因而需要先以PR方程的计算值为预测值，这个值是非常接近实
 %          际的而后再使用选择viral方程求解的多个实根中最接近PR方程预测值的量。
 %     4) 采用PR计算需要重新编写PR的程序，不经济，直接用取多个实际根中接近实验值的
-rhoj=[];    %定义一个空的中间变量数组用来存储三次方程的多重实根 
-deltaRHOj=[];
+
+% 2019-3-16-修正
+% 寻找根的过程应该是低耦合的，不应该存在和实验数据的任何关系
+% 此处用理想气体状态方程替代预测值，当寻找到两个以上实际根时，定位根到同使用理想气体状态方程
+% 计算结果差异最小的实根
+% 如此，该框架可以在系统仿真中使用
+rhoj=zeros(3,1);    %定义一个空的中间变量数组用来存储三次方程的多重实根 
+deltaRHOj=zeros(3,1);
+
 % 对每一个方程开启筛选实际根
 for i=1:NP
+    % j用以统计三次方程实数根的个数，一般是1个，也有可能是2个，两个时需要找出需要的值
     j=0;
-    s=roots(tri_coeff(i,:));
-    for k=1:length(s);
-        ss=isreal(s(k));
-        if (ss==1)&&(s(k)>0) 
+    % s 为一个三元向量
+    sroot=roots(tri_coeff(i,:));
+    for k=1:length(sroot);
+        real_S=isreal(sroot(k));
+        if (real_S==1)&&(sroot(k)>0)
             j=j+1;
-            rhoj(j)=s(k);
-            deltaRHOj(j)=rhoj(j)-rho(i);   
+            rhoj(j)=sroot(k);%测试
+            deltaRHOj(j)=rhoj(j)-P(i)/(R*T(i));   
+           %deltaRHOj(j)=rhoj(j)-rho(i);   
            % rhoc=s(k);
         else
             %pass
         end
     end
+ % 定位真实值所在位置，index为其下标
 [deltamin,index]=min(abs(deltaRHOj(1:j)));
-delta=deltaRHOj(index);
-rhoc=rho(i)+delta;
-RHOC(i)=rhoc;
+%delta=deltaRHOj(index);
+%rhoc=rho(i)+delta;
+%RHO_temp暂存合理的根
+RHO_temp(i)=rhoj(index);
 end
-RHOcal=RHOC';
+RHOcal=RHO_temp';
 Dev_RHO=100*(RHOcal-rho)./rho;
 %Dev3=-100*Dev3;
 disp('计算无误，开始出图......');
@@ -187,21 +194,25 @@ title('density devitation');
 figure(3);
 plot(T,1000*Bm,'o');
 title('Bm*1000');
+figure(4);
+plot(T,1000000*Cm,'o');
+title('Cm*1000');
 %% caculate p and density
 %%  use NIST to caculate critical point
 %disp('Caculate done now save coefficents')
-disp('(程序结束，存取维里系数)');
+disp('(程序结束，存取维里系数, 存取计算结果)');
 %% save coefficents
-LT=coeff';
-csvwrite('viralco.csv',LT);
-SaveYN=input('是否存取计算压力偏差，密度偏差数据(Y|N):','s');
-if SaveYN=='Y'
-    csvwrite('devtation.csv',[T P X1 rho RHOcal P_cal Dev_P Dev_RHO]);
-end
+csvwrite('viralco.csv',virial_coeff');
+%SaveYN=input('是否存取计算压力偏差，密度偏差数据(Y|N):','s');
+%if SaveYN=='Y'
+DevFile=[Readfile,'_CalResults.csv'];
+DevFiledata=table(T,P,X1,rho,RHOcal,P_cal,Dev_P,Dev_RHO,Bm,Cm);
+writetable(DevFiledata,DevFile);
+%end
 end
 
 
-function P=viral_TRHO2P(L,data)
+function P=viral_TRHO2P(virial_coeff,inputdata)
 % data: input data matrix
 % L: coefficients
 global Tc1 Tc2
@@ -209,30 +220,30 @@ global Tc1 Tc2
 %Tc2=374.25; %HFC-134a
 %Tc2=351.26 ;%HFC-32
 R=8.3144;
-T=data(:,1);
-RHO=data(:,4);
-X1=data(:,3);
-b1=L(1);
-b2=L(2);
-b3=L(3);
-b4=L(4);
-b5=L(5);
-b6=L(6);
-b7=L(7);
-b8=L(8);
-b9=L(9);
-c1=L(10);
-c2=L(11);
-c3=L(12);
-c4=L(13);
-c5=L(14);
-c6=L(15);
-c7=L(16);
-c8=L(17);
-c9=L(18);
-c10=L(19);
-c11=L(20);
-c12=L(21);
+T=inputdata(:,1);
+RHO=inputdata(:,4);
+X1=inputdata(:,3);
+b1=virial_coeff(1);
+b2=virial_coeff(2);
+b3=virial_coeff(3);
+b4=virial_coeff(4);
+b5=virial_coeff(5);
+b6=virial_coeff(6);
+b7=virial_coeff(7);
+b8=virial_coeff(8);
+b9=virial_coeff(9);
+c1=virial_coeff(10);
+c2=virial_coeff(11);
+c3=virial_coeff(12);
+c4=virial_coeff(13);
+c5=virial_coeff(14);
+c6=virial_coeff(15);
+c7=virial_coeff(16);
+c8=virial_coeff(17);
+c9=virial_coeff(18);
+c10=virial_coeff(19);
+c11=virial_coeff(20);
+c12=virial_coeff(21);
 Tc12=sqrt(Tc1*Tc2);
 Tc112=(Tc1*Tc1*Tc2)^(1/3);
 Tc221=(Tc1*Tc2*Tc2)^(1/3);
